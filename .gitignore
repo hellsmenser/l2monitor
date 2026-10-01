@@ -1,0 +1,83 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.DotSettings
+*.nupkg
+*.nupkg.metadata
+*.snupkg
+packages/
+*.log
+*.tmp
+.nuget/
+project.lock.json
+project.assets.json
+
+# .NET Native AOT
+*.aotprofile
+*.aotrepro
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
+ehthumbs.db
+
+# Build artifacts
+[Dd]ebug/
+[Rr]elease/
+.codex-out/
+artifacts/
+installer/_published/
+data/release-verify/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+
+# Config with secrets (tokens, keys)
+Config/tokens.json
+.env
+.env.*
+!.env.example
+.private/
+*.pfx
+*.p12
+*.pem
+*.key
+*.snk
+**/secrets.dat
+**/bootstrap.dat
+**/runtime-state.json
+
+# Release packages are produced from committed sources by CI/build scripts
+*.zip
+*.sha256
+
+# Test coverage
+coverage/
+*.coverage
+*.coveragexml
+
+# NuGet
+**/[Pp]ackages/[Rr]elease*/
+**/[Pp]ackages/[Dd]ebug*/
+
+# Vector workspace — dev notes, plans, logs (not part of the project)
+_vector/
+_tmp*/
+_review*/
+
+# Python cache left by historical tooling
+**/__pycache__/
+*.py[cod]
+
+# Make sure audio samples in Data/ are tracked though
+# agent/Data/*.wav stays tracked - extractors can be committed

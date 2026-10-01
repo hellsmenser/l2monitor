@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <AssemblyName>Aden+</AssemblyName>
+    <RootNamespace>L2Monitor.Tray</RootNamespace>
+    <Product>Aden+</Product>
+    <Description>Монитор состояния клиента Lineage II</Description>
+    <ApplicationIcon>Assets\AdenPlus.ico</ApplicationIcon>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\AdenPlus.ico" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
+    <ProjectReference Include="..\L2Monitor.Core\L2Monitor.Core.csproj" />
+  </ItemGroup>
+
+</Project>

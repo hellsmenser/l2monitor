@@ -1,0 +1,9 @@
+<Solution>
+  <Project Path="L2Monitor.Agent/L2Monitor.Agent.csproj" />
+  <Project Path="L2Monitor.Agent.Tests/L2Monitor.Agent.Tests.csproj" />
+  <Project Path="L2Monitor.Core/L2Monitor.Core.csproj" />
+  <Project Path="L2Monitor.Core.Tests/L2Monitor.Core.Tests.csproj" />
+  <Project Path="L2Monitor.Infrastructure.Windows/L2Monitor.Infrastructure.Windows.csproj" />
+  <Project Path="L2Monitor.Tray/L2Monitor.Tray.csproj" />
+  <Project Path="L2Monitor.Tray.Tests/L2Monitor.Tray.Tests.csproj" />
+</Solution>

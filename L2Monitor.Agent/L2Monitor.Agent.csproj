@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <AssemblyName>AdenPlus.Agent</AssemblyName>
+    <RootNamespace>L2Monitor.Agent</RootNamespace>
+    <Product>Aden+</Product>
+    <Description>Фоновый компонент Aden+</Description>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="8.0.1" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\L2Monitor.Core\L2Monitor.Core.csproj" />
+    <ProjectReference Include="..\L2Monitor.Infrastructure.Windows\L2Monitor.Infrastructure.Windows.csproj" />
+  </ItemGroup>
+
+</Project>
