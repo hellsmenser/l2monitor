@@ -352,7 +352,8 @@ internal sealed class AgentNotificationSender(
         {
             MonitorEventKind.GhostDisconnectSuspected or MonitorEventKind.ClientDisconnected =>
                 snapshot.Settings.Notifications.DisconnectNotificationEnabled,
-            MonitorEventKind.ProcessExited => snapshot.Settings.Notifications.ProcessExitedNotificationEnabled,
+            MonitorEventKind.ProcessExited or MonitorEventKind.ProcessExitedWhileDead =>
+                snapshot.Settings.Notifications.ProcessExitedNotificationEnabled,
             MonitorEventKind.DeadStarted => snapshot.Settings.Notifications.DeadStartedNotificationEnabled,
             _ => true,
         };
@@ -360,20 +361,8 @@ internal sealed class AgentNotificationSender(
     private static string BuildMonitorEventText(
         AgentConfigurationSnapshot snapshot,
         MonitorEvent monitorEvent,
-        string? windowTitle)
-    {
-        var customTemplate = monitorEvent.Kind switch
-        {
-            MonitorEventKind.GhostDisconnectSuspected or MonitorEventKind.ClientDisconnected =>
-                snapshot.Settings.Notifications.GhostDisconnectMessageTemplate
-                ?? snapshot.Settings.Notifications.ClientDisconnectedMessageTemplate,
-            MonitorEventKind.ProcessExited => snapshot.Settings.Notifications.ProcessExitedMessageTemplate,
-            MonitorEventKind.DeadStarted => snapshot.Settings.Notifications.DeadStartedMessageTemplate,
-            _ => null,
-        };
-
-        return BuildMonitorEventText(snapshot, monitorEvent, windowTitle, pickVariantIndex: null);
-    }
+        string? windowTitle) =>
+        BuildMonitorEventText(snapshot, monitorEvent, windowTitle, pickVariantIndex: null);
 
     internal static string BuildMonitorEventText(
         AgentConfigurationSnapshot snapshot,
@@ -385,24 +374,28 @@ internal sealed class AgentNotificationSender(
         {
             MonitorEventKind.GhostDisconnectSuspected or MonitorEventKind.ClientDisconnected =>
                 snapshot.Settings.Notifications.GhostDisconnectMessageTemplate
-                ?? snapshot.Settings.Notifications.ClientDisconnectedMessageTemplate,
-            MonitorEventKind.ProcessExited => snapshot.Settings.Notifications.ProcessExitedMessageTemplate,
-            MonitorEventKind.DeadStarted => snapshot.Settings.Notifications.DeadStartedMessageTemplate,
+                ?? snapshot.Settings.Notifications.ClientDisconnectedMessageTemplate
+                ?? AgentNotificationDefaults.DisconnectMessageTemplate,
+            MonitorEventKind.ProcessExited or MonitorEventKind.ProcessExitedWhileDead =>
+                snapshot.Settings.Notifications.ProcessExitedMessageTemplate
+                ?? AgentNotificationDefaults.ProcessExitedMessageTemplate,
+            MonitorEventKind.DeadStarted => snapshot.Settings.Notifications.DeadStartedMessageTemplate
+                ?? AgentNotificationDefaults.DeadStartedMessageTemplate,
             _ => null,
         };
 
         if (string.IsNullOrWhiteSpace(customTemplate))
         {
-            return BuildDefaultMonitorEventText(monitorEvent);
+            return BuildTechnicalMonitorEventText(monitorEvent);
         }
 
         var selectedTemplate = SelectTemplateVariant(customTemplate, pickVariantIndex);
         return string.IsNullOrWhiteSpace(selectedTemplate)
-            ? BuildDefaultMonitorEventText(monitorEvent)
+            ? BuildTechnicalMonitorEventText(monitorEvent)
             : RenderTemplate(selectedTemplate, monitorEvent, windowTitle);
     }
 
-    private static string BuildDefaultMonitorEventText(MonitorEvent monitorEvent) =>
+    private static string BuildTechnicalMonitorEventText(MonitorEvent monitorEvent) =>
         monitorEvent.Kind switch
         {
             MonitorEventKind.GhostDisconnectSuspected =>

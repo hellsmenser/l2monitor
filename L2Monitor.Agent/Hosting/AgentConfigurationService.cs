@@ -576,7 +576,8 @@ internal sealed class AgentConfigurationService
 
         var disconnectTemplate = NormalizeOptionalString(
             settings.Notifications.GhostDisconnectMessageTemplate
-            ?? settings.Notifications.ClientDisconnectedMessageTemplate);
+            ?? settings.Notifications.ClientDisconnectedMessageTemplate)
+            ?? AgentNotificationDefaults.DisconnectMessageTemplate;
 
         return settings with
         {
@@ -605,9 +606,11 @@ internal sealed class AgentConfigurationService
                 GhostDisconnectMessageTemplate = disconnectTemplate,
                 ClientDisconnectedMessageTemplate = disconnectTemplate,
                 ProcessExitedNotificationEnabled = settings.Notifications.ProcessExitedNotificationEnabled,
-                ProcessExitedMessageTemplate = NormalizeOptionalString(settings.Notifications.ProcessExitedMessageTemplate),
+                ProcessExitedMessageTemplate = NormalizeOptionalString(settings.Notifications.ProcessExitedMessageTemplate)
+                    ?? AgentNotificationDefaults.ProcessExitedMessageTemplate,
                 DeadStartedNotificationEnabled = settings.Notifications.DeadStartedNotificationEnabled,
-                DeadStartedMessageTemplate = NormalizeOptionalString(settings.Notifications.DeadStartedMessageTemplate),
+                DeadStartedMessageTemplate = NormalizeOptionalString(settings.Notifications.DeadStartedMessageTemplate)
+                    ?? AgentNotificationDefaults.DeadStartedMessageTemplate,
             },
         };
     }
@@ -759,12 +762,37 @@ internal sealed record CloudSettings
 internal sealed record AgentNotificationSettings
 {
     public bool DisconnectNotificationEnabled { get; init; } = true;
-    public string? GhostDisconnectMessageTemplate { get; init; }
-    public string? ClientDisconnectedMessageTemplate { get; init; }
+    public string? GhostDisconnectMessageTemplate { get; init; } = AgentNotificationDefaults.DisconnectMessageTemplate;
+    public string? ClientDisconnectedMessageTemplate { get; init; } = AgentNotificationDefaults.DisconnectMessageTemplate;
     public bool ProcessExitedNotificationEnabled { get; init; } = true;
-    public string? ProcessExitedMessageTemplate { get; init; }
+    public string? ProcessExitedMessageTemplate { get; init; } = AgentNotificationDefaults.ProcessExitedMessageTemplate;
     public bool DeadStartedNotificationEnabled { get; init; } = true;
-    public string? DeadStartedMessageTemplate { get; init; }
+    public string? DeadStartedMessageTemplate { get; init; } = AgentNotificationDefaults.DeadStartedMessageTemplate;
+}
+
+internal static class AgentNotificationDefaults
+{
+    public const string DisconnectMessageTemplate = """
+        Персонажа дисконектнуло! Верните его скорее.
+        Персонаж покинул сервер. Подозрительно!
+        Персонаж потерял связь с сервером. Интернет шалит?
+        Связь с персонажем оборвалась. Надеемся, ненадолго.
+        """;
+
+    public const string ProcessExitedMessageTemplate = """
+        Персонаж покинул игру. Клиент закрылся.
+        Персонаж больше не в игре. Кажется, клиент завершил работу.
+        Клиент больше не отвечает. Пора запускать заново.
+        Персонаж исчез из Эльморадена. Клиент приказал долго жить.
+        """;
+
+    public const string DeadStartedMessageTemplate = """
+        С прискорбием сообщаем, что персонаж погиб.
+        Милорды и миледи! Храбрый воин пал в бою.
+        Кажется, что персонаж нуждается в воскрешении.
+        Эльмораден скорбит! Персонаж был убит.
+        Вас убили! Зайдите в игру, чтобы отомстить обидчику.
+        """;
 }
 
 internal sealed record AgentSecrets

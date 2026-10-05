@@ -406,7 +406,7 @@ public sealed class LocalControlApiContractTests
     }
 
     [Fact]
-    public async Task TraySettingsUpdate_PreservesUtf8DisconnectTemplateAndClearsBothLegacyFields()
+    public async Task TraySettingsUpdate_PreservesUtf8DisconnectTemplateAndRestoresDefaultsWhenCleared()
     {
         await using var scope = await AgentHostScope.CreateAsync();
         const string exactTemplate = "Дисконнект у {name} ⚔️";
@@ -453,8 +453,10 @@ public sealed class LocalControlApiContractTests
         using var clearResponse = await scope.Client.SendAsync(clearRequest);
         clearResponse.EnsureSuccessStatusCode();
         var cleared = new AgentConfigurationService().GetSnapshot();
-        Assert.Null(cleared.Settings.Notifications.GhostDisconnectMessageTemplate);
-        Assert.Null(cleared.Settings.Notifications.ClientDisconnectedMessageTemplate);
+        Assert.Equal(AgentNotificationDefaults.DisconnectMessageTemplate, cleared.Settings.Notifications.GhostDisconnectMessageTemplate);
+        Assert.Equal(AgentNotificationDefaults.DisconnectMessageTemplate, cleared.Settings.Notifications.ClientDisconnectedMessageTemplate);
+        Assert.Equal(AgentNotificationDefaults.ProcessExitedMessageTemplate, cleared.Settings.Notifications.ProcessExitedMessageTemplate);
+        Assert.Equal(AgentNotificationDefaults.DeadStartedMessageTemplate, cleared.Settings.Notifications.DeadStartedMessageTemplate);
         Assert.DoesNotContain(exactTemplate, await File.ReadAllTextAsync(Path.Combine(scope.RootDirectory, "settings.json"), Encoding.UTF8), StringComparison.Ordinal);
     }
 
