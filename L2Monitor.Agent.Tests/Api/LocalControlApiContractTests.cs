@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using L2Monitor.Agent.Hosting;
 using L2Monitor.Agent.Runtime;
+using L2Monitor.Agent.Updates;
 using L2Monitor.Core.Api;
 using L2Monitor.Core.Delivery;
 using L2Monitor.Core.Models;
@@ -62,6 +63,69 @@ public sealed class LocalControlApiContractTests
         Assert.True(payload.ProbeCount >= 1);
         Assert.NotNull(payload.Delivery);
         Assert.NotNull(payload.Backend);
+    }
+
+    [Fact]
+    public async Task Status_ExposesAvailableReleaseForTrayBannerAndWindowsNotification()
+    {
+        await using var scope = await AgentHostScope.CreateAsync();
+        scope.Host.Services.GetRequiredService<AgentControlStateStore>().SetLastUpdate(
+            new AgentUpdateStateRecord(
+                "available",
+                "1.0.1",
+                "1.0.2",
+                true,
+                true,
+                "https://github.com/hellsmenser/l2monitor/releases/tag/v1.0.2",
+                DateTimeOffset.UtcNow));
+
+        using var request = scope.CreateAuthorizedRequest(HttpMethod.Get, "/v1/status");
+        using var response = await scope.Client.SendAsync(request);
+
+        response.EnsureSuccessStatusCode();
+        var payload = await response.Content.ReadFromJsonAsync<StatusResponseDto>();
+        Assert.NotNull(payload?.Update);
+        Assert.True(payload.Update.IsUpdateAvailable);
+        Assert.True(payload.Update.Required);
+        Assert.Equal("1.0.2", payload.Update.LatestVersion);
+        Assert.StartsWith("https://github.com/hellsmenser/l2monitor/releases/", payload.Update.ReleaseUrl, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Local")]
+    [InlineData("Cloud")]
+    public async Task UpdateCheck_IsActiveInAutonomousAndServiceDeliveryModes(string deliveryMode)
+    {
+        var initialSettings = JsonSerializer.Serialize(AgentSettings.Default with
+        {
+            Delivery = new DeliverySettings { Mode = deliveryMode },
+            Cloud = new CloudSettings { BackendBaseUrl = "https://service.example/" },
+        });
+        await using var scope = await AgentHostScope.CreateAsync(
+            builder =>
+            {
+                builder.Services.RemoveAll<IAgentReleaseUpdateChecker>();
+                builder.Services.AddSingleton<IAgentReleaseUpdateChecker, StubReleaseUpdateChecker>();
+            },
+            initialSettingsJson: initialSettings);
+
+        StatusResponseDto? payload = null;
+        var timeout = DateTime.UtcNow.AddSeconds(2);
+        while (DateTime.UtcNow < timeout)
+        {
+            using var request = scope.CreateAuthorizedRequest(HttpMethod.Get, "/v1/status");
+            using var response = await scope.Client.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            payload = await response.Content.ReadFromJsonAsync<StatusResponseDto>();
+            if (payload?.Update?.IsUpdateAvailable == true)
+            {
+                break;
+            }
+            await Task.Delay(10);
+        }
+
+        Assert.Equal(deliveryMode, payload?.CurrentMode);
+        Assert.True(payload?.Update?.IsUpdateAvailable);
     }
 
     [Fact]
@@ -1754,7 +1818,7 @@ public sealed class LocalControlApiContractTests
     }
 
     [Fact]
-    public async Task ProbeAsync_DoesNotEmitDisconnectForConnectingOnlyRow()
+    public async Task ProbeAsync_DoesNotEmitClosureForNeverActiveConnectingProcess()
     {
         var rootDirectory = Path.Combine(Path.GetTempPath(), "l2monitor-agent-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(rootDirectory);
@@ -1800,7 +1864,105 @@ public sealed class LocalControlApiContractTests
             await InvokeNonPublicTaskAsync(service, "ProbeAsync", CancellationToken.None);
 
             Assert.Equal(0, sender.CallCount);
-            Assert.DoesNotContain(controlState.GetIncidents(10), item => item.Kind is "client_disconnected" or "process_exited");
+            Assert.Empty(sender.MonitorEvents);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("L2MONITOR_AGENT_HOME", previousAgentHome);
+            if (Directory.Exists(rootDirectory))
+            {
+                Directory.Delete(rootDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ProbeAsync_EmitsDisconnectRecoveryAndClosureForOneClient()
+    {
+        var rootDirectory = Path.Combine(Path.GetTempPath(), "l2monitor-agent-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(rootDirectory);
+        var previousAgentHome = Environment.GetEnvironmentVariable("L2MONITOR_AGENT_HOME");
+        Environment.SetEnvironmentVariable("L2MONITOR_AGENT_HOME", rootDirectory);
+
+        try
+        {
+            WriteSettings(rootDirectory, minConfirmLifetimeSec: 15);
+            var sender = new RecordingNotificationSender();
+            var service = CreateRuntimeService(
+                new AgentRuntimeStateStore(),
+                new SequenceRuntimeProbe(
+                    Snapshot("2026-10-04T10:00:00+00:00", "Connected"),
+                    Snapshot("2026-10-04T10:00:30+00:00", "Connecting"),
+                    Snapshot("2026-10-04T10:01:00+00:00", "Connected"),
+                    new AgentRuntimeProbeSnapshot(
+                        DateTimeOffset.Parse("2026-10-04T10:01:30+00:00"),
+                        CandidateProcessCount: 0,
+                        GameConnectionCount: 0,
+                        Connections: [])),
+                notificationSender: sender);
+
+            for (var index = 0; index < 4; index++)
+            {
+                await InvokeNonPublicTaskAsync(service, "ProbeAsync", CancellationToken.None);
+            }
+
+            Assert.Equal(
+                [MonitorEventKind.ClientDisconnected, MonitorEventKind.IdleBack, MonitorEventKind.ProcessExited],
+                sender.MonitorEvents.Select(static item => item.Kind).ToArray());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("L2MONITOR_AGENT_HOME", previousAgentHome);
+            if (Directory.Exists(rootDirectory))
+            {
+                Directory.Delete(rootDirectory, recursive: true);
+            }
+        }
+
+        static AgentRuntimeProbeSnapshot Snapshot(string timestamp, string state) =>
+            new(
+                DateTimeOffset.Parse(timestamp),
+                CandidateProcessCount: 1,
+                GameConnectionCount: state == "Connected" ? 1 : 0,
+                Connections:
+                [
+                    new AgentRuntimeConnectionSnapshot(
+                        "pid-424242", "l2.bin", "Lineage II", state, DateTimeOffset.Parse(timestamp)),
+                ]);
+    }
+
+    [Fact]
+    public async Task ProbeAsync_EmitsProcessExitEvenWhenLastStateWasConnecting()
+    {
+        var rootDirectory = Path.Combine(Path.GetTempPath(), "l2monitor-agent-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(rootDirectory);
+        var previousAgentHome = Environment.GetEnvironmentVariable("L2MONITOR_AGENT_HOME");
+        Environment.SetEnvironmentVariable("L2MONITOR_AGENT_HOME", rootDirectory);
+
+        try
+        {
+            WriteSettings(rootDirectory, minConfirmLifetimeSec: 15);
+            var sender = new RecordingNotificationSender();
+            var service = CreateRuntimeService(
+                new AgentRuntimeStateStore(),
+                new SequenceRuntimeProbe(
+                    new AgentRuntimeProbeSnapshot(
+                        DateTimeOffset.Parse("2026-10-04T09:59:00+00:00"), 1, 1,
+                        [new AgentRuntimeConnectionSnapshot("pid-999999", "l2.bin", "Lineage II", "Connected", DateTimeOffset.Parse("2026-10-04T09:59:00+00:00"))]),
+                    new AgentRuntimeProbeSnapshot(
+                        DateTimeOffset.Parse("2026-10-04T10:00:00+00:00"), 1, 0,
+                        [new AgentRuntimeConnectionSnapshot("pid-999999", "l2.bin", "Lineage II", "Connecting", DateTimeOffset.Parse("2026-10-04T10:00:00+00:00"))]),
+                    new AgentRuntimeProbeSnapshot(
+                        DateTimeOffset.Parse("2026-10-04T10:00:05+00:00"), 0, 0, [])),
+                notificationSender: sender);
+
+            await InvokeNonPublicTaskAsync(service, "ProbeAsync", CancellationToken.None);
+            await InvokeNonPublicTaskAsync(service, "ProbeAsync", CancellationToken.None);
+            await InvokeNonPublicTaskAsync(service, "ProbeAsync", CancellationToken.None);
+
+            Assert.Equal(
+                [MonitorEventKind.ClientDisconnected, MonitorEventKind.ProcessExited],
+                sender.MonitorEvents.Select(static item => item.Kind).ToArray());
         }
         finally
         {
@@ -1898,7 +2060,7 @@ public sealed class LocalControlApiContractTests
     }
 
     [Fact]
-    public async Task ProbeAsync_SuppressesDisconnectEscalationForLegacyGhostState()
+    public async Task ProbeAsync_SuppressesClosureForUnprovenLegacyGhostState()
     {
         var rootDirectory = Path.Combine(Path.GetTempPath(), "l2monitor-agent-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(rootDirectory);
@@ -1938,6 +2100,7 @@ public sealed class LocalControlApiContractTests
             await InvokeNonPublicTaskAsync(service, "ProbeAsync", CancellationToken.None);
 
             Assert.Equal(0, sender.CallCount);
+            Assert.Empty(sender.MonitorEvents);
             Assert.DoesNotContain(controlState.GetIncidents(10), item => item.Kind is "ghost_disconnect_suspected" or "client_disconnected");
         }
         finally
@@ -2224,6 +2387,22 @@ public sealed class LocalControlApiContractTests
         private readonly HttpMessageHandler _handler = handler;
 
         public HttpClient CreateClient(string name) => new(_handler, disposeHandler: false);
+    }
+
+    private sealed class StubReleaseUpdateChecker : IAgentReleaseUpdateChecker
+    {
+        public Task<AgentUpdateCheckResult> CheckAsync(
+            Uri backendBaseUri,
+            string currentVersion,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new AgentUpdateCheckResult(
+                "available",
+                currentVersion,
+                "9.9.9",
+                true,
+                false,
+                "https://github.com/hellsmenser/l2monitor/releases/tag/v9.9.9",
+                DateTimeOffset.UtcNow));
     }
 
     private sealed class ThrowingHttpMessageHandler(Exception exception) : HttpMessageHandler

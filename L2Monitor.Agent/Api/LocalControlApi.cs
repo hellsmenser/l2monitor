@@ -261,7 +261,8 @@ internal sealed class AgentCommandService
                 : BuildBackendHealth(config),
             _controlState.GetLastIncident() is { } incident ? MapIncident(incident) : null,
             _controlState.GetLastNotificationResult() is { } notification ? MapActionResult(notification) : null,
-            connections);
+            connections,
+            _controlState.GetLastUpdate() is { } update ? MapUpdate(update) : null);
     }
 
     public ConnectionsResponseDto GetConnections() =>
@@ -676,6 +677,16 @@ internal sealed class AgentCommandService
 
     private static ApiVersionDto CreateVersionDto() =>
         new(LocalControlApiContract.CurrentVersion, LocalControlApiContract.MinimumSupportedVersion);
+
+    private static ClientUpdateDto MapUpdate(AgentUpdateStateRecord update) =>
+        new(
+            update.State,
+            update.CurrentVersion,
+            update.LatestVersion,
+            update.IsUpdateAvailable,
+            update.Required,
+            update.ReleaseUrl,
+            update.CheckedAtUtc);
 
     private static LocalControlSettingsDto MapSettings(AgentSettings settings) =>
         new(

@@ -21,6 +21,15 @@ public sealed record ComponentHealthDto(
     DateTimeOffset? CheckedAtUtc = null,
     DateTimeOffset? LastSuccessAtUtc = null);
 
+public sealed record ClientUpdateDto(
+    string State,
+    string CurrentVersion,
+    string? LatestVersion,
+    bool IsUpdateAvailable,
+    bool Required,
+    string? ReleaseUrl,
+    DateTimeOffset? CheckedAtUtc);
+
 public sealed record AgentActionResultDto(
     string Action,
     string Outcome,
@@ -146,7 +155,8 @@ public sealed record StatusResponseDto(
     ComponentHealthDto Backend,
     AgentIncidentDto? LastIncident,
     AgentActionResultDto? LastNotificationResult,
-    IReadOnlyList<AgentConnectionDto> Connections);
+    IReadOnlyList<AgentConnectionDto> Connections,
+    ClientUpdateDto? Update = null);
 
 public sealed record ConnectionsResponseDto(
     ApiVersionDto ApiVersion,

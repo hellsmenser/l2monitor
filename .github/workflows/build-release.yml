@@ -1,0 +1,60 @@
+name: Build release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic version without the v prefix
+        required: true
+        default: 1.0.0-rc.2
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-build:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      ADENPLUS_BACKEND_BASE_URL: ${{ secrets.ADENPLUS_BACKEND_BASE_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Verify source
+        shell: pwsh
+        run: |
+          dotnet test .\L2Monitor.slnx -c Release --nologo
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet format .\L2Monitor.slnx --verify-no-changes --no-restore --verbosity minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\installer\Verify-L2MonitorInstaller.ps1
+
+      - name: Build unsigned candidate
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:ADENPLUS_BACKEND_BASE_URL)) {
+            throw "Repository secret ADENPLUS_BACKEND_BASE_URL is not configured."
+          }
+          .\build\Build-AdenPlusRelease.ps1 `
+            -Version $env:RELEASE_VERSION `
+            -BackendBaseUrl $env:ADENPLUS_BACKEND_BASE_URL `
+            -SkipTests
+
+      - name: Upload unsigned candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: AdenPlus-${{ inputs.version }}-unsigned
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            .codex-out/release/*.zip
+            .codex-out/release/*.sha256

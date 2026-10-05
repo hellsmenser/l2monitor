@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -26,6 +27,7 @@ internal sealed partial class MainWindow : Window
     private bool _deliveryModeSelectionDirty;
     private bool _suppressDirtyTracking;
     private bool _actionsEnabled = true;
+    private Uri? _releaseUri;
 
     public MainWindow(LocalControlApiClient apiClient, IAutostartService? autostartService = null)
     {
@@ -47,6 +49,7 @@ internal sealed partial class MainWindow : Window
         CopyTelegramLinkCodeButton.Click += (_, _) => CopyTelegramLinkCode();
         SaveTelegramSecretButton.Click += async (_, _) => await SaveTelegramSecretAsync().ConfigureAwait(true);
         SaveCloudSecretButton.Click += async (_, _) => await SaveCloudSecretAsync().ConfigureAwait(true);
+        OpenReleaseButton.Click += (_, _) => OpenReleasePage();
 
         DeliveryEnabledInput.Checked += OnSettingsEdited;
         DeliveryEnabledInput.Unchecked += OnSettingsEdited;
@@ -75,6 +78,7 @@ internal sealed partial class MainWindow : Window
     }
 
     public event EventHandler<TrayPresentationSummary>? TraySummaryChanged;
+    public event EventHandler<ClientUpdateDto>? UpdateStatusChanged;
 
     public void ShowWindow()
     {
@@ -273,8 +277,67 @@ internal sealed partial class MainWindow : Window
         PopulateConnections(dashboard.Status.Connections);
         PopulateIncidents(dashboard.Incidents.Items);
         ApplySettingsIfAllowed(dashboard.Settings, forceSettings);
+        ApplyUpdateStatus(dashboard.Status.Update);
 
         TraySummaryChanged?.Invoke(this, summary);
+    }
+
+    internal void ApplyUpdateStatus(ClientUpdateDto? update)
+    {
+        if (update is null
+            || !update.IsUpdateAvailable
+            || string.IsNullOrWhiteSpace(update.LatestVersion))
+        {
+            _releaseUri = null;
+            UpdateBannerBorder.Visibility = Visibility.Collapsed;
+            OpenReleaseButton.IsEnabled = false;
+            return;
+        }
+
+        _releaseUri = TryValidateReleaseUri(update.ReleaseUrl, out var releaseUri) ? releaseUri : null;
+        UpdateBannerText.Text = update.Required
+            ? $"Ваша версия Aden+ {update.CurrentVersion} устарела. Доступна версия {update.LatestVersion}. Это обязательное обновление."
+            : $"Ваша версия Aden+ {update.CurrentVersion} устарела. Доступна версия {update.LatestVersion}.";
+        OpenReleaseButton.IsEnabled = _releaseUri is not null;
+        UpdateBannerBorder.Visibility = Visibility.Visible;
+        UpdateStatusChanged?.Invoke(this, update);
+    }
+
+    private void OpenReleasePage()
+    {
+        if (_releaseUri is null)
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(_releaseUri.AbsoluteUri)
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        {
+            const string message = "Не удалось открыть страницу релиза. Откройте раздел Releases репозитория Aden+ вручную.";
+            System.Windows.MessageBox.Show(this, message, "Не удалось открыть обновление", MessageBoxButton.OK, MessageBoxImage.Warning);
+            SetReadyState(message);
+        }
+    }
+
+    private static bool TryValidateReleaseUri(string? value, out Uri releaseUri)
+    {
+        releaseUri = null!;
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var candidate)
+            || candidate.Scheme != Uri.UriSchemeHttps
+            || !candidate.IsDefaultPort
+            || !string.IsNullOrEmpty(candidate.UserInfo))
+        {
+            return false;
+        }
+
+        releaseUri = candidate;
+        return true;
     }
 
     private void ApplyOfflineState(string message)

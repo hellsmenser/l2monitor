@@ -23,6 +23,8 @@ internal sealed class AgentRuntimeService : BackgroundService
     private readonly ILogger<AgentRuntimeService> _logger;
     private readonly TimeSpan _minimumPollInterval;
     private readonly Dictionary<int, DateTimeOffset> _lastPublishedDeadStartedByPid = [];
+    private readonly HashSet<string> _confirmedActiveConnectionIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _disconnectedConnectionIds = new(StringComparer.OrdinalIgnoreCase);
 
     public AgentRuntimeService(
         AgentLaunchOptions launchOptions,
@@ -217,8 +219,66 @@ internal sealed class AgentRuntimeService : BackgroundService
 
         foreach (var previous in previousConnections)
         {
-            if (currentById.ContainsKey(previous.Id))
+            if (currentById.TryGetValue(previous.Id, out var current))
             {
+                if (ShouldIgnoreConnection(previous, ignoredWindowTitlesText))
+                {
+                    continue;
+                }
+
+                var wasActive = IsActiveState(previous.State);
+                var isActive = IsActiveState(current.State);
+                if (wasActive == isActive)
+                {
+                    continue;
+                }
+
+                if (wasActive)
+                {
+                    if (!_confirmedActiveConnectionIds.Contains(previous.Id)
+                        && !HasMetConfirmLifetime(previous, observedAtUtc, minConfirmLifetimeSec))
+                    {
+                        continue;
+                    }
+
+                    _confirmedActiveConnectionIds.Add(previous.Id);
+                    _disconnectedConnectionIds.Add(previous.Id);
+                }
+                else if (!_disconnectedConnectionIds.Remove(previous.Id))
+                {
+                    continue;
+                }
+
+                var transitionPid = ParsePid(current.Id);
+                var transitionEvent = isActive
+                    ? new MonitorEvent(
+                        observedAtUtc.UtcDateTime,
+                        transitionPid,
+                        current.ProcessName,
+                        MonitorEventKind.IdleBack,
+                        Math.Max(0, (int)(observedAtUtc - previous.ObservedAtUtc).TotalSeconds))
+                    : new MonitorEvent(
+                        observedAtUtc.UtcDateTime,
+                        transitionPid,
+                        current.ProcessName,
+                        MonitorEventKind.ClientDisconnected,
+                        0);
+                var transitionKind = isActive ? "client_reconnected" : "client_disconnected";
+                var transitionSeverity = isActive ? "info" : "warning";
+                var transitionSummary = isActive
+                    ? $"Client {current.ProcessName} ({current.Id}) restored its game connection."
+                    : $"Client {current.ProcessName} ({current.Id}) lost its active game connection.";
+
+                await RecordAndSendMonitorEventAsync(
+                        transitionKind,
+                        transitionSeverity,
+                        transitionSummary,
+                        transitionEvent,
+                        current,
+                        observedAtUtc,
+                        null,
+                        cancellationToken)
+                    .ConfigureAwait(false);
                 continue;
             }
 
@@ -227,18 +287,30 @@ internal sealed class AgentRuntimeService : BackgroundService
                 continue;
             }
 
-            if (!CanEmitDisconnectEvent(previous))
-            {
-                continue;
-            }
-
-            if (!HasMetDisconnectConfirmLifetime(previousProbeCompletedAtUtc, observedAtUtc, minConfirmLifetimeSec))
-            {
-                continue;
-            }
-
             var pid = ParsePid(previous.Id);
             var processStillExists = IsProcessAlive(pid);
+            if (processStillExists)
+            {
+                if (!IsActiveState(previous.State)
+                    || !HasMetDisconnectConfirmLifetime(
+                        previousProbeCompletedAtUtc,
+                        observedAtUtc,
+                        minConfirmLifetimeSec))
+                {
+                    continue;
+                }
+            }
+            else
+            {
+                var wasConfirmedActive = _confirmedActiveConnectionIds.Contains(previous.Id)
+                    || _disconnectedConnectionIds.Contains(previous.Id)
+                    || (IsActiveState(previous.State)
+                        && HasMetConfirmLifetime(previous, observedAtUtc, minConfirmLifetimeSec));
+                if (!wasConfirmedActive)
+                {
+                    continue;
+                }
+            }
             var kind = processStillExists ? "client_disconnected" : "process_exited";
             var severity = processStillExists ? "warning" : "info";
             var summary = processStillExists
@@ -253,6 +325,11 @@ internal sealed class AgentRuntimeService : BackgroundService
 
             await RecordAndSendMonitorEventAsync(kind, severity, summary, monitorEvent, previous, observedAtUtc, null, cancellationToken)
                 .ConfigureAwait(false);
+            if (!processStillExists)
+            {
+                _confirmedActiveConnectionIds.Remove(previous.Id);
+                _disconnectedConnectionIds.Remove(previous.Id);
+            }
         }
     }
 
@@ -380,9 +457,9 @@ internal sealed class AgentRuntimeService : BackgroundService
         previousProbeCompletedAtUtc.HasValue
         && observedAtUtc - previousProbeCompletedAtUtc.Value >= TimeSpan.FromSeconds(minConfirmLifetimeSec);
 
-    private static bool CanEmitDisconnectEvent(AgentConnectionRecord connection) =>
-        string.Equals(connection.State, "Connected", StringComparison.Ordinal)
-        || string.Equals(connection.State, "GameplayOnly", StringComparison.Ordinal);
+    private static bool IsActiveState(string state) =>
+        string.Equals(state, "Connected", StringComparison.Ordinal)
+        || string.Equals(state, "GameplayOnly", StringComparison.Ordinal);
 
     private static AgentConnectionRecord SelectAudioEventConnection(
         IReadOnlyList<AgentConnectionRecord> currentConnections,

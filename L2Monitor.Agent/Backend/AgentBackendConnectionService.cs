@@ -11,7 +11,6 @@ using Microsoft.Extensions.Logging;
 namespace L2Monitor.Agent.Backend;
 
 internal sealed class AgentBackendConnectionService(
-    IHttpClientFactory httpClientFactory,
     AgentConfigurationService configuration,
     AgentControlStateStore controlState,
     TimeProvider timeProvider,
@@ -23,27 +22,23 @@ internal sealed class AgentBackendConnectionService(
     private const int MaxMessageBytes = 64 * 1024;
 
     private readonly object _socketSync = new();
-    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly AgentConfigurationService _configuration = configuration;
     private readonly AgentControlStateStore _controlState = controlState;
     private readonly TimeProvider _timeProvider = timeProvider;
     private readonly ILogger<AgentBackendConnectionService> _logger = logger;
     private ClientWebSocket? _activeSocket;
-    private int _versionRequestStarted;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
             var snapshot = _configuration.GetSnapshot();
-            if (!TryResolveCloudConnection(snapshot, out var httpBaseUri, out var webSocketUri, out var authKey, out var error))
+            if (!TryResolveCloudConnection(snapshot, out _, out var webSocketUri, out var authKey, out var error))
             {
                 SetHealth("disabled", error);
                 await DelayAsync(ConfigurationPollInterval, stoppingToken).ConfigureAwait(false);
                 continue;
             }
-
-            await RequestVersionOnceAsync(httpBaseUri, stoppingToken).ConfigureAwait(false);
 
             try
             {
@@ -90,30 +85,6 @@ internal sealed class AgentBackendConnectionService(
         }
 
         await base.StopAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task RequestVersionOnceAsync(Uri backendBaseUri, CancellationToken cancellationToken)
-    {
-        if (Interlocked.Exchange(ref _versionRequestStarted, 1) != 0)
-        {
-            return;
-        }
-
-        var versionUri = new Uri(backendBaseUri, "/public/client-version");
-        var now = _timeProvider.GetUtcNow();
-        try
-        {
-            var client = _httpClientFactory.CreateClient();
-            using var response = await client.GetAsync(versionUri, cancellationToken).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
-            _logger.LogInformation("Версия клиента проверена одним запросом. Uri={VersionUri}", versionUri);
-            SetHealth("connecting", "Версия проверена; устанавливается WebSocket-соединение.", now);
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            _logger.LogWarning(ex, "Единственный запрос версии завершился ошибкой. Uri={VersionUri}", versionUri);
-            SetHealth("unreachable", $"Не удалось проверить версию: {ex.Message}", now);
-        }
     }
 
     private async Task RunSocketSessionAsync(Uri webSocketUri, string authKey, CancellationToken cancellationToken)
@@ -196,10 +167,9 @@ internal sealed class AgentBackendConnectionService(
             return false;
         }
 
-        if (!Uri.TryCreate(snapshot.Settings.Cloud.BackendBaseUrl, UriKind.Absolute, out var resolvedBackendBaseUri)
-            || (resolvedBackendBaseUri.Scheme != Uri.UriSchemeHttp && resolvedBackendBaseUri.Scheme != Uri.UriSchemeHttps))
+        if (!AgentBackendUriPolicy.TryResolve(snapshot.Settings.Cloud.BackendBaseUrl, out var resolvedBackendBaseUri))
         {
-            error = "Для облачного режима нужен корректный HTTP(S)-адрес backend.";
+            error = "Для облачного режима нужен HTTPS-адрес backend; HTTP разрешён только для loopback-разработки.";
             return false;
         }
 

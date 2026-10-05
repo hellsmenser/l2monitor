@@ -6,7 +6,8 @@ param(
     [string]$RuntimeIdentifier = "win-x64",
     [string]$BackendBaseUrl,
     [string]$OutputRoot,
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [switch]$AllowDirtyWorktree
 )
 
 Set-StrictMode -Version Latest
@@ -28,6 +29,16 @@ $stagingRoot = Join-Path $resolvedOutputRoot $packageName
 $agentRoot = Join-Path $stagingRoot "runtime\agent"
 $archivePath = Join-Path $resolvedOutputRoot ($packageName + ".zip")
 $checksumPath = Join-Path $resolvedOutputRoot ($packageName + ".sha256")
+
+if (-not $AllowDirtyWorktree) {
+    $gitStatus = & git -C $repoRoot status --porcelain --untracked-files=all
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to verify the Git worktree before release build."
+    }
+    if ($gitStatus) {
+        throw "Release builds require a clean Git worktree. Commit or stash changes, or use -AllowDirtyWorktree for a non-release development build."
+    }
+}
 
 function Test-PathUnderRoot {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Root)
@@ -100,8 +111,10 @@ if ($LASTEXITCODE -ne 0) {
 if (-not [string]::IsNullOrWhiteSpace($BackendBaseUrl)) {
     $resolvedBackendUri = $null
     if (-not [Uri]::TryCreate($BackendBaseUrl.Trim(), [UriKind]::Absolute, [ref]$resolvedBackendUri) -or
-        $resolvedBackendUri.Scheme -notin @("http", "https")) {
-        throw "BackendBaseUrl must be an absolute HTTP(S) URL."
+        ($resolvedBackendUri.Scheme -ne "https" -and
+            ($resolvedBackendUri.Scheme -ne "http" -or -not $resolvedBackendUri.IsLoopback)) -or
+        -not [string]::IsNullOrEmpty($resolvedBackendUri.UserInfo)) {
+        throw "BackendBaseUrl must use HTTPS; HTTP is allowed only for loopback development builds."
     }
 
     $defaults = [pscustomobject]@{ backendBaseUrl = $resolvedBackendUri.AbsoluteUri }
@@ -115,6 +128,7 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") -Destination (Join-Path $
 Copy-Item -LiteralPath (Join-Path $repoRoot "README.md") -Destination (Join-Path $stagingRoot "README.md")
 Copy-Item -LiteralPath (Join-Path $repoRoot "PRIVACY.md") -Destination (Join-Path $stagingRoot "PRIVACY.md")
 Copy-Item -LiteralPath (Join-Path $repoRoot "SECURITY.md") -Destination (Join-Path $stagingRoot "SECURITY.md")
+Copy-Item -LiteralPath (Join-Path $repoRoot "CODE_SIGNING.md") -Destination (Join-Path $stagingRoot "CODE_SIGNING.md")
 Copy-Item -LiteralPath (Join-Path $repoRoot "docs\RELEASE_NOTES.md") -Destination (Join-Path $stagingRoot "RELEASE_NOTES.md")
 
 $mediaSource = Join-Path $repoRoot "docs\media"

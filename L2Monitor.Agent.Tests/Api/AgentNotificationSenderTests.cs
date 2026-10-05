@@ -125,7 +125,7 @@ public sealed class AgentNotificationSenderTests
     }
 
     [Fact]
-    public async Task SendTestNotificationAsync_CloudDoesNotUseHttpRelay()
+    public async Task SendTestNotificationAsync_CloudPostsAuthenticatedEventToBackend()
     {
         var handler = new CaptureHandler();
         var sender = new AgentNotificationSender(
@@ -140,14 +140,51 @@ public sealed class AgentNotificationSenderTests
 
         var result = await sender.SendTestNotificationAsync(snapshot);
 
-        Assert.False(result.Delivered);
-        Assert.Null(handler.LastAuthorizationScheme);
-        Assert.Null(handler.LastAuthorizationParameter);
-        Assert.Null(handler.LastFormBody);
-        Assert.Equal(DeliveryHealthState.Disabled, result.Health.State);
-        Assert.Equal("Для облачного режима проверка отправки недоступна.", result.Health.Summary);
-        Assert.DoesNotContain("HTTP", result.Health.Summary, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("WebSocket", result.Health.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.Delivered);
+        Assert.Equal("Bearer", handler.LastAuthorizationScheme);
+        Assert.Equal("agent-token", handler.LastAuthorizationParameter);
+        Assert.Equal("https://backend.example.test/public/agent/events", handler.LastRequestUri);
+        Assert.NotNull(handler.LastJsonBody);
+        Assert.Contains("\"kind\":\"test_notification\"", handler.LastJsonBody!, StringComparison.Ordinal);
+        Assert.Contains("\"machine_fingerprint\":", handler.LastJsonBody!, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(MonitorEventKind.ClientDisconnected, "client_disconnected")]
+    [InlineData(MonitorEventKind.IdleBack, "client_reconnected")]
+    [InlineData(MonitorEventKind.ProcessExited, "client_closed")]
+    [InlineData(MonitorEventKind.DeadStarted, "character_death")]
+    public async Task SendMonitorEventAsync_CloudMapsSupportedRuntimeEvents(
+        MonitorEventKind kind,
+        string expectedKind)
+    {
+        var handler = new CaptureHandler();
+        var sender = new AgentNotificationSender(
+            new StubHttpClientFactory(handler),
+            TimeProvider.System,
+            NullLogger<AgentNotificationSender>.Instance);
+        var snapshot = CreateSnapshot(
+            ghostDisconnectMessageTemplate: null,
+            deliveryMode: "Cloud",
+            backendBaseUrl: "https://backend.example.test",
+            cloudAuthKey: "agent-token");
+        var monitorEvent = new MonitorEvent(
+            new DateTime(2026, 10, 4, 10, 0, 0, DateTimeKind.Utc),
+            4242,
+            "l2.bin",
+            kind,
+            kind == MonitorEventKind.IdleBack ? 30 : 0);
+
+        var result = await sender.SendMonitorEventAsync(
+            snapshot,
+            monitorEvent,
+            new Dictionary<string, string?> { ["windowTitle"] = "Lineage II" });
+
+        Assert.True(result.Delivered);
+        Assert.Contains($"\"kind\":\"{expectedKind}\"", handler.LastJsonBody!, StringComparison.Ordinal);
+        Assert.Contains("\"process_id\":0", handler.LastJsonBody!, StringComparison.Ordinal);
+        Assert.Contains("\"process_name\":\"Lineage II\"", handler.LastJsonBody!, StringComparison.Ordinal);
+        Assert.Contains("\"window_title\":null", handler.LastJsonBody!, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -310,14 +347,18 @@ public sealed class AgentNotificationSenderTests
         public string? LastFormBody { get; private set; }
         public string? LastAuthorizationScheme { get; private set; }
         public string? LastAuthorizationParameter { get; private set; }
+        public string? LastRequestUri { get; private set; }
+        public string? LastJsonBody { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             LastAuthorizationScheme = request.Headers.Authorization?.Scheme;
             LastAuthorizationParameter = request.Headers.Authorization?.Parameter;
-            LastFormBody = request.Content is null
+            LastRequestUri = request.RequestUri?.ToString();
+            LastJsonBody = request.Content is null
                 ? null
                 : await request.Content.ReadAsStringAsync(cancellationToken);
+            LastFormBody = LastJsonBody;
 
             return new HttpResponseMessage(HttpStatusCode.OK)
             {

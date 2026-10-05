@@ -31,6 +31,28 @@ public sealed class AgentBackendBoundaryTests
     }
 
     [Fact]
+    public void CloudConnection_RejectsPublicPlainHttpBeforeSendingAccessKey()
+    {
+        var snapshot = new AgentConfigurationSnapshot(
+            AgentSettings.Default with
+            {
+                Delivery = new DeliverySettings { Mode = "Cloud" },
+                Cloud = new CloudSettings { BackendBaseUrl = "http://backend.example.test/" },
+            },
+            AgentSecrets.Empty with { CloudAuthKey = "agent-key" });
+
+        var resolved = AgentBackendConnectionService.TryResolveCloudConnection(
+            snapshot,
+            out _,
+            out _,
+            out _,
+            out var error);
+
+        Assert.False(resolved);
+        Assert.Contains("HTTPS", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AgentAndTraySources_DoNotContainRemovedHttpRelayEndpoints()
     {
         var repositoryRoot = FindRepositoryRoot();

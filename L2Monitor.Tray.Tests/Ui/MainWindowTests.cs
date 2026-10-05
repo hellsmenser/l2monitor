@@ -18,6 +18,55 @@ namespace L2Monitor.Tray.Tests.Ui;
 public sealed class MainWindowTests
 {
     [Fact]
+    public void UpdateBanner_RemainsVisibleWithReleaseLinkWhenNewVersionIsAvailable()
+    {
+        RunInSta(() =>
+        {
+            var window = new MainWindow(apiClient: null!);
+            var update = new ClientUpdateDto(
+                State: "available",
+                CurrentVersion: "1.0.1",
+                LatestVersion: "1.0.2",
+                IsUpdateAvailable: true,
+                Required: true,
+                ReleaseUrl: "https://github.com/hellsmenser/l2monitor/releases/tag/v1.0.2",
+                CheckedAtUtc: DateTimeOffset.UtcNow);
+
+            window.ApplyUpdateStatus(update);
+
+            var banner = Assert.IsType<Border>(window.FindName("UpdateBannerBorder"));
+            var text = Assert.IsType<TextBlock>(window.FindName("UpdateBannerText"));
+            var button = Assert.IsType<Button>(window.FindName("OpenReleaseButton"));
+            Assert.Equal(Visibility.Visible, banner.Visibility);
+            Assert.Contains("1.0.2", text.Text, StringComparison.Ordinal);
+            Assert.Contains("обязательное", text.Text, StringComparison.OrdinalIgnoreCase);
+            Assert.True(button.IsEnabled);
+            window.Close();
+        });
+    }
+    [Fact]
+    public void UpdateBanner_RemainsVisibleWhenBackendHasNotPublishedDownloadUrlYet()
+    {
+        RunInSta(() =>
+        {
+            var window = new MainWindow(apiClient: null!);
+            var update = new ClientUpdateDto(
+                State: "available",
+                CurrentVersion: "1.0.1",
+                LatestVersion: "1.0.2",
+                IsUpdateAvailable: true,
+                Required: false,
+                ReleaseUrl: null,
+                CheckedAtUtc: DateTimeOffset.UtcNow);
+
+            window.ApplyUpdateStatus(update);
+
+            Assert.Equal(Visibility.Visible, Assert.IsType<Border>(window.FindName("UpdateBannerBorder")).Visibility);
+            Assert.False(Assert.IsType<Button>(window.FindName("OpenReleaseButton")).IsEnabled);
+            window.Close();
+        });
+    }
+    [Fact]
     public void MainWindowScrollBarStyle_DoesNotForceVerticalBarsToFourteenPixelsTall()
     {
         RunInSta(() =>

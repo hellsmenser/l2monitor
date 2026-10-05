@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using L2Monitor.Agent.Hosting;
@@ -27,6 +28,7 @@ internal sealed class AgentNotificationSender(
     ILogger<AgentNotificationSender> logger) : IAgentNotificationSender
 {
     internal const string TelegramHttpClientName = "telegram-secret-redacted";
+    internal const string CloudHttpClientName = "agent-event-relay-secret-redacted";
 
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly TimeProvider _timeProvider = timeProvider;
@@ -51,7 +53,7 @@ internal sealed class AgentNotificationSender(
         return ResolveMode(snapshot.Settings.Delivery.Mode) switch
         {
             DeliveryMode.Local => SendTelegramAsync(snapshot, message, cancellationToken),
-            DeliveryMode.Cloud => RejectCloudNotification(now),
+            DeliveryMode.Cloud => SendCloudAsync(snapshot, message, cancellationToken),
             _ => Task.FromResult(new NotificationDispatchResult(
                 false,
                 new DeliveryHealthSnapshot(
@@ -93,7 +95,7 @@ internal sealed class AgentNotificationSender(
         return ResolveMode(snapshot.Settings.Delivery.Mode) switch
         {
             DeliveryMode.Local => SendTelegramAsync(snapshot, message, cancellationToken),
-            DeliveryMode.Cloud => RejectCloudNotification(occurredAt),
+            DeliveryMode.Cloud => SendCloudAsync(snapshot, message, cancellationToken),
             _ => Task.FromResult(new NotificationDispatchResult(
                 false,
                 new DeliveryHealthSnapshot(
@@ -157,12 +159,108 @@ internal sealed class AgentNotificationSender(
         }
     }
 
-    private Task<NotificationDispatchResult> RejectCloudNotification(DateTimeOffset now) =>
-        Task.FromResult(Reject(
-            DeliveryMode.Cloud,
-            DeliveryHealthState.Disabled,
-            "Для облачного режима проверка отправки недоступна.",
-            now));
+    private async Task<NotificationDispatchResult> SendCloudAsync(
+        AgentConfigurationSnapshot snapshot,
+        NotificationMessage message,
+        CancellationToken cancellationToken)
+    {
+        var now = _timeProvider.GetUtcNow();
+        if (!AgentBackendUriPolicy.TryResolve(snapshot.Settings.Cloud.BackendBaseUrl, out var backendBaseUri))
+        {
+            return Reject(
+                DeliveryMode.Cloud,
+                DeliveryHealthState.Misconfigured,
+                "Cloud delivery requires HTTPS or a loopback development URL.",
+                now);
+        }
+
+        var authKey = snapshot.Secrets.CloudAuthKey?.Trim();
+        if (string.IsNullOrWhiteSpace(authKey))
+        {
+            return Reject(
+                DeliveryMode.Cloud,
+                DeliveryHealthState.NotConfigured,
+                "Cloud delivery requires an agent access key.",
+                now);
+        }
+
+        if (!TryMapCloudEventKind(message.Event.Kind, out var eventKind))
+        {
+            return Reject(
+                DeliveryMode.Cloud,
+                DeliveryHealthState.ProtocolError,
+                "Cloud delivery does not support this notification type.",
+                now);
+        }
+
+        var machineName = Environment.MachineName;
+        var payload = new Dictionary<string, object?>
+        {
+            ["event_id"] = Guid.NewGuid(),
+            ["kind"] = eventKind,
+            ["occurred_at"] = message.OccurredAtUtc,
+            ["machine_fingerprint"] = machineName,
+            ["machine_label"] = machineName,
+            // The backend contract requires process fields, but delivery only needs the
+            // rendered notification text. Do not duplicate local PID/title data in
+            // separate cloud fields.
+            ["process_id"] = 0,
+            ["process_name"] = "Lineage II",
+            ["window_title"] = null,
+            ["duration_seconds"] = Math.Max(0, message.Event.DurationSec),
+            ["message"] = message.Text,
+        };
+
+        var endpoint = new Uri(
+            $"{backendBaseUri.AbsoluteUri.TrimEnd('/')}/public/agent/events",
+            UriKind.Absolute);
+        var client = _httpClientFactory.CreateClient(CloudHttpClientName);
+        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+        {
+            Content = JsonContent.Create(payload),
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", authKey);
+
+        try
+        {
+            using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            var health = MapResponse(
+                DeliveryMode.Cloud,
+                response,
+                "Cloud event accepted by backend.",
+                now);
+            LogDispatchOutcome(health, response.StatusCode);
+            return new NotificationDispatchResult(health.State == DeliveryHealthState.Healthy, health);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(
+                "Cloud event relay request failed. ExceptionType={ExceptionType}",
+                ex.GetType().Name);
+            return Reject(DeliveryMode.Cloud, DeliveryHealthState.Unreachable, "Cloud relay unreachable.", now);
+        }
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "Cloud event relay request timed out. ExceptionType={ExceptionType}",
+                ex.GetType().Name);
+            return Reject(DeliveryMode.Cloud, DeliveryHealthState.Unreachable, "Cloud relay timed out.", now);
+        }
+    }
+
+    private static bool TryMapCloudEventKind(MonitorEventKind kind, out string eventKind)
+    {
+        eventKind = kind switch
+        {
+            MonitorEventKind.GhostDisconnectSuspected or MonitorEventKind.ClientDisconnected => "client_disconnected",
+            MonitorEventKind.IdleBack => "client_reconnected",
+            MonitorEventKind.ProcessExited or MonitorEventKind.ProcessExitedWhileDead => "client_closed",
+            MonitorEventKind.DeadStarted => "character_death",
+            MonitorEventKind.TestNotification => "test_notification",
+            _ => string.Empty,
+        };
+        return eventKind.Length > 0;
+    }
 
     private static NotificationDispatchResult CreateRejectedResult(
         DeliveryMode mode,

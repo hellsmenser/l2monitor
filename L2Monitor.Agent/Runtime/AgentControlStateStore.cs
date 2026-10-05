@@ -11,6 +11,7 @@ internal sealed class AgentControlStateStore
     private AgentActionResultRecord? _lastNotificationResult;
     private DeliveryHealthSnapshot? _lastDeliveryHealth;
     private AgentComponentHealthRecord? _lastBackendHealth;
+    private AgentUpdateStateRecord? _lastUpdate;
 
     public void RecordIncident(string kind, string severity, string summary, DateTimeOffset occurredAtUtc)
     {
@@ -88,6 +89,22 @@ internal sealed class AgentControlStateStore
         }
     }
 
+    public void SetLastUpdate(AgentUpdateStateRecord update)
+    {
+        lock (_sync)
+        {
+            _lastUpdate = update;
+        }
+    }
+
+    public AgentUpdateStateRecord? GetLastUpdate()
+    {
+        lock (_sync)
+        {
+            return _lastUpdate;
+        }
+    }
+
     public void InvalidateCachedHealth()
     {
         lock (_sync)
@@ -124,3 +141,12 @@ internal sealed record AgentComponentHealthRecord(
     string Summary,
     DateTimeOffset? CheckedAtUtc = null,
     DateTimeOffset? LastSuccessAtUtc = null);
+
+internal sealed record AgentUpdateStateRecord(
+    string State,
+    string CurrentVersion,
+    string? LatestVersion,
+    bool IsUpdateAvailable,
+    bool Required,
+    string? ReleaseUrl,
+    DateTimeOffset CheckedAtUtc);

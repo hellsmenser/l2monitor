@@ -1,5 +1,6 @@
 using L2Monitor.Agent.Backend;
 using L2Monitor.Agent.Runtime;
+using L2Monitor.Agent.Updates;
 using L2Monitor.Core.Diagnostics;
 using L2Monitor.Infrastructure.Windows.DependencyInjection;
 using Microsoft.AspNetCore.Builder;
@@ -40,15 +41,26 @@ internal static class AgentHostBuilder
         builder.Services.AddSingleton<AgentControlStateStore>();
         builder.Services.AddSingleton(AgentRuntimeOptions.Default);
         builder.Services.AddSingleton<AgentConfigurationService>();
+        builder.Services.AddSingleton(new AgentUpdateEndpointConfiguration(
+            AgentConfigurationService.LoadPackagedDefaults().Cloud.BackendBaseUrl));
+        builder.Services.AddSingleton<IAgentUpdateEndpointProvider, AgentUpdateEndpointProvider>();
         builder.Services.AddSingleton<IAgentRestartCoordinator, AgentRestartCoordinator>();
         builder.Services.AddHttpClient();
         builder.Services
             .AddHttpClient(AgentNotificationSender.TelegramHttpClientName)
             .RemoveAllLoggers();
+        builder.Services
+            .AddHttpClient(AgentNotificationSender.CloudHttpClientName)
+            .RemoveAllLoggers();
+        builder.Services
+            .AddHttpClient(BackendReleaseUpdateChecker.HttpClientName)
+            .RemoveAllLoggers();
         builder.Services.AddL2MonitorWindowsInfrastructure();
         builder.Services.AddSingleton<IAgentRuntimeProbe, WindowsMonitorProbeAdapter>();
         builder.Services.AddSingleton<IAgentNotificationSender, AgentNotificationSender>();
+        builder.Services.AddSingleton<IAgentReleaseUpdateChecker, BackendReleaseUpdateChecker>();
         builder.Services.AddSingleton<AgentCommandService>();
+        builder.Services.AddHostedService<AgentReleaseUpdateService>();
         builder.Services.AddHostedService<AgentBackendConnectionService>();
         builder.Services.AddHostedService<AgentRuntimeService>();
 

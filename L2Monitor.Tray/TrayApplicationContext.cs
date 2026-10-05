@@ -8,6 +8,8 @@ using L2Monitor.Tray.Api;
 using L2Monitor.Tray.Bootstrap;
 using L2Monitor.Tray.Presentation;
 using L2Monitor.Tray.Ui;
+using L2Monitor.Tray.Updates;
+using L2Monitor.Core.Api;
 using Microsoft.Extensions.Logging;
 
 namespace L2Monitor.Tray;
@@ -26,6 +28,8 @@ internal sealed class TrayApplicationContext : IDisposable
     private readonly ILogger<TrayApplicationContext> _logger;
     private readonly WpfApplication _application;
     private readonly Icon _applicationIcon;
+    private readonly UpdateNotificationStateStore _updateNotificationStore;
+    private UpdateNotificationRecord? _lastUpdateNotification;
 
     public TrayApplicationContext(
         LocalControlApiClient apiClient,
@@ -37,8 +41,11 @@ internal sealed class TrayApplicationContext : IDisposable
         _application = application;
         _logger = logger;
         _applicationIcon = LoadApplicationIcon();
+        _updateNotificationStore = new UpdateNotificationStateStore();
+        _lastUpdateNotification = _updateNotificationStore.Load();
         _mainWindow = new MainWindow(apiClient, autostartService);
         _mainWindow.TraySummaryChanged += OnTraySummaryChanged;
+        _mainWindow.UpdateStatusChanged += OnUpdateStatusChanged;
 
         _openMenuItem = new Forms.ToolStripMenuItem("Открыть окно", null, (_, _) => _mainWindow.ShowWindow());
         _refreshMenuItem = new Forms.ToolStripMenuItem("Обновить", null, async (_, _) => await _mainWindow.RefreshNowAsync(forceSettings: false).ConfigureAwait(true));
@@ -69,6 +76,7 @@ internal sealed class TrayApplicationContext : IDisposable
         };
 
         _notifyIcon.MouseUp += OnNotifyIconMouseUp;
+        _notifyIcon.BalloonTipClicked += (_, _) => _mainWindow.ShowWindow();
 
         _refreshTimer = new DispatcherTimer
         {
@@ -104,6 +112,34 @@ internal sealed class TrayApplicationContext : IDisposable
         _notifyIcon.Text = summary.Tooltip.Length <= 63
             ? summary.Tooltip
             : summary.Tooltip[..63];
+    }
+
+    private void OnUpdateStatusChanged(object? sender, ClientUpdateDto update)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (!UpdateNotificationPolicy.ShouldNotify(update, _lastUpdateNotification, now))
+        {
+            return;
+        }
+
+        _notifyIcon.BalloonTipTitle = "Доступно обновление Aden+";
+        _notifyIcon.BalloonTipText = update.Required
+            ? $"Ваша версия {update.CurrentVersion} устарела. Доступна {update.LatestVersion}. Обновление обязательно. Откройте Aden+."
+            : $"Ваша версия {update.CurrentVersion} устарела. Доступна {update.LatestVersion}. Откройте Aden+ для обновления.";
+        _notifyIcon.BalloonTipIcon = Forms.ToolTipIcon.Info;
+        _notifyIcon.ShowBalloonTip(10000);
+
+        _lastUpdateNotification = new UpdateNotificationRecord(update.LatestVersion!, now);
+        try
+        {
+            _updateNotificationStore.Save(_lastUpdateNotification);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(
+                "Failed to persist update-notification throttle state. ExceptionType={ExceptionType}",
+                ex.GetType().Name);
+        }
     }
 
     private async Task ExitApplicationAsync()

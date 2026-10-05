@@ -328,8 +328,7 @@ internal sealed class AgentConfigurationService
             }
 
             var backendBaseUrl = NormalizeOptionalString(backendBaseUrlElement.GetString());
-            if (!Uri.TryCreate(backendBaseUrl, UriKind.Absolute, out var backendUri)
-                || (backendUri.Scheme != Uri.UriSchemeHttp && backendUri.Scheme != Uri.UriSchemeHttps))
+            if (!AgentBackendUriPolicy.TryResolve(backendBaseUrl, out var backendUri))
             {
                 return AgentSettings.Default;
             }
@@ -637,13 +636,12 @@ internal sealed class AgentConfigurationService
         }
         else if (string.Equals(snapshot.Settings.Delivery.Mode, "Cloud", StringComparison.OrdinalIgnoreCase))
         {
-            if (!Uri.TryCreate(snapshot.Settings.Cloud.BackendBaseUrl, UriKind.Absolute, out var backendUri)
-                || (backendUri.Scheme != Uri.UriSchemeHttp && backendUri.Scheme != Uri.UriSchemeHttps))
+            if (!AgentBackendUriPolicy.TryResolve(snapshot.Settings.Cloud.BackendBaseUrl, out _))
             {
                 diagnostics.Add(new AgentConfigurationDiagnostic(
                     "backend_startup_misconfigured",
                     "warning",
-                    "Startup diagnostic: Cloud delivery mode is active but BackendBaseUrl is not a valid absolute http(s) URL."));
+                    "Startup diagnostic: Cloud delivery mode requires HTTPS or a loopback development URL."));
             }
 
             if (string.IsNullOrWhiteSpace(snapshot.Secrets.CloudAuthKey))

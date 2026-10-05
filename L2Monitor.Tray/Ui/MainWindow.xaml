@@ -489,6 +489,7 @@
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -520,7 +521,30 @@
             </Grid>
         </Border>
 
-        <TabControl Grid.Row="1">
+        <Border x:Name="UpdateBannerBorder"
+                Grid.Row="1"
+                Margin="0,0,0,12"
+                Padding="14,12"
+                CornerRadius="12"
+                Background="#433A20"
+                BorderBrush="#E0B84F"
+                BorderThickness="1"
+                Visibility="Collapsed">
+            <DockPanel LastChildFill="True">
+                <Button x:Name="OpenReleaseButton"
+                        DockPanel.Dock="Right"
+                        Margin="14,0,0,0"
+                        Padding="16,8"
+                        Content="Скачать обновление" />
+                <TextBlock x:Name="UpdateBannerText"
+                           VerticalAlignment="Center"
+                           Foreground="#FFE7A3"
+                           FontWeight="SemiBold"
+                           TextWrapping="Wrap" />
+            </DockPanel>
+        </Border>
+
+        <TabControl Grid.Row="2">
             <TabItem Header="Сводка">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
@@ -773,7 +797,7 @@
             </TabItem>
         </TabControl>
 
-        <Border Grid.Row="2" Style="{StaticResource CardStyle}" Margin="0,12,0,0" Padding="12,10" Background="#252C35">
+        <Border Grid.Row="3" Style="{StaticResource CardStyle}" Margin="0,12,0,0" Padding="12,10" Background="#252C35">
             <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedBrush}" Text="Готово." TextWrapping="Wrap" />
         </Border>
     </Grid>

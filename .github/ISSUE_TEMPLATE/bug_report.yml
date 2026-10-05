@@ -1,0 +1,43 @@
+name: Сообщить об ошибке
+description: Воспроизводимая проблема в Windows-клиенте Aden+
+title: "[Ошибка]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Не прикладывайте ключ Aden+, токен Telegram, `secrets.dat` или журналы без предварительной проверки личных данных. Для уязвимостей используйте приватный канал из SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Версия Aden+
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Версия Windows
+      placeholder: Windows 11 24H2
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Как воспроизвести
+      description: Перечислите минимальную последовательность действий.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Ожидаемое поведение
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Фактическое поведение
+    validations:
+      required: true

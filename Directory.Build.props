@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <Authors>Aden+ contributors</Authors>
+    <Company>Aden+ contributors</Company>
+    <Copyright>Copyright (c) 2026 Aden+ contributors</Copyright>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/hellsmenser/l2monitor</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+</Project>
