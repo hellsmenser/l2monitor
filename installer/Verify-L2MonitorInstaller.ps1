@@ -64,16 +64,18 @@ try {
     }
 
     New-L2MonitorDirectory -Path $unrelatedProcessRoot
-    $powershellExe = (Get-Process -Id $PID).Path
+    # Use a self-contained Windows executable here. Copying pwsh.exe works on a
+    # developer machine with Windows PowerShell, but the GitHub runner uses
+    # PowerShell 7 whose executable depends on files beside it and exits when
+    # copied on its own.
+    $pingExe = Join-Path $env:SystemRoot "System32\ping.exe"
     foreach ($processName in @("AdenPlus.Agent", "Aden+")) {
         $processExecutablePath = Join-Path $unrelatedProcessRoot ($processName + ".exe")
-        Copy-Item -LiteralPath $powershellExe -Destination $processExecutablePath -Force
+        Copy-Item -LiteralPath $pingExe -Destination $processExecutablePath -Force
         $startedProcesses += Start-Process -FilePath $processExecutablePath -ArgumentList @(
-            "-NoProfile",
-            "-WindowStyle",
-            "Hidden",
-            "-Command",
-            "Start-Sleep -Seconds 60"
+            "127.0.0.1",
+            "-n",
+            "61"
         ) -PassThru -WindowStyle Hidden
     }
 
